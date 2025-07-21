@@ -1,0 +1,197 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASCII Art Generator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+        #container {
+            text-align: center;
+        }
+        #asciiText {
+            white-space: pre;
+            background: #fff;
+            padding: 10px;
+            border: 1px solid #ccc;
+            max-width: 100%;
+            overflow-x: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        #asciiCanvas {
+            margin-top: 20px;
+        }
+        button, input {
+            margin: 10px;
+            padding: 8px 16px;
+            font-size: 16px;
+        }
+        label {
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>ASCII Art Generator</h1>
+        <input type="file" id="imageInput" accept="image/*">
+        <div>
+            <label for="brightness">Яркость: <span id="brightnessValue">0</span></label>
+            <input type="range" id="brightness" min="-100" max="100" value="0">
+        </div>
+        <div>
+            <label for="contrast">Контрастность: <span id="contrastValue">0</span></label>
+            <input type="range" id="contrast" min="-100" max="100" value="0">
+        </div>
+        <button onclick="copyToClipboard()">Скопировать ASCII</button>
+        <button onclick="downloadImage()">Скачать изображение</button>
+        <pre id="asciiText"></pre>
+        <div id="asciiCanvas"></div>
+    </div>
+
+    <script>
+        let img;
+        let asciiText = '';
+        let brightness = 0;
+        let contrast = 0;
+        let charWidth = 8;
+        let charHeight = 12;
+
+        function setup() {
+            let canvas = createCanvas(0, 0);
+            canvas.parent('asciiCanvas');
+        }
+
+        function preload() {
+            let input = document.getElementById('imageInput');
+            input.addEventListener('change', function(e) {
+                let file = e.target.files[0];
+                if (file) {
+                    let url = URL.createObjectURL(file);
+                    img = loadImage(url, () => {
+                        processImage();
+                    });
+                }
+            });
+
+            document.getElementById('brightness').addEventListener('input', function(e) {
+                brightness = parseInt(e.target.value);
+                document.getElementById('brightnessValue').textContent = brightness;
+                if (img) processImage();
+            });
+
+            document.getElementById('contrast').addEventListener('input', function(e) {
+                contrast = parseInt(e.target.value);
+                document.getElementById('contrastValue').textContent = contrast;
+                if (img) processImage();
+            });
+        }
+
+        function processImage() {
+            let maxWidth = 100;
+            let scale = maxWidth / img.width;
+            let w = Math.floor(img.width * scale);
+            let h = Math.floor(img.height * scale * (charWidth / charHeight));
+            
+            resizeCanvas(w * charWidth, h * charHeight);
+            img.resize(w, h);
+            
+            img.filter(GRAY);
+            img.loadPixels();
+            
+            let contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+            let brightnessAdjustment = brightness;
+
+            asciiText = '';
+            background(255);
+            textSize(charHeight);
+            textAlign(LEFT, TOP);
+            fill(0);
+            
+            let chars = '@#S%?*+;:,. ';
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    let index = (x + y * w) * 4;
+                    let r = img.pixels[index];
+                    r = contrastFactor * (r - 128) + 128 + brightnessAdjustment;
+                    r = constrain(r, 0, 255);
+                    let charIndex = floor(map(r, 0, 255, chars.length - 1, 0));
+                    let c = chars[charIndex];
+                    asciiText += c;
+                    text(c, x * charWidth, y * charHeight);
+                }
+                asciiText += '\n';
+            }
+            
+            document.getElementById('asciiText').textContent = asciiText;
+        }
+
+        function copyToClipboard() {
+            if (asciiText) {
+                navigator.clipboard.writeText(asciiText).then(() => {
+                    alert('ASCII-арт скопирован в буфер обмена!');
+                });
+            } else {
+                alert('Сначала загрузите изображение!');
+            }
+        }
+
+        function downloadImage() {
+            if (img) {
+                saveCanvas('ascii_art', 'png');
+            } else {
+                alert('Сначала загрузите изображение!');
+            }
+        }
+    </script>
+</body>
+</html>
